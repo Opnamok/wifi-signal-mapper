@@ -1,0 +1,13 @@
+# Service-account private key — never commit this
+credentials.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Generated live tracker (regenerate with: python wifi_mapper.py live)
+live_map.html
+
+# Note: viewer/wifi_map.html IS committed on purpose — it is the demo artifact.

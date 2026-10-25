@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WiFi Signal Map</title>
+
+<!--
+  This file is a TEMPLATE. It is not meant to be opened directly - the four
+  /*__..._*/ markers below are filled in by build_viewer.py, which writes the
+  openable artifact to viewer/wifi_map.html.
+
+      python build_viewer.py
+-->
+
+<style>/*__LEAFLET_CSS__*/</style>
+
+<style>
+  :root {
+    --panel-w: 320px;
+    --bg: #ffffff;
+    --fg: #1a1d21;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 13px;
+    color: var(--fg);
+    background: var(--bg);
+  }
+
+  #app { display: flex; height: 100%; }
+  #map { flex: 1; height: 100%; background: #dfe3e8; }
+
+  #panel {
+    width: var(--panel-w);
+    flex: 0 0 var(--panel-w);
+    border-left: 1px solid var(--line);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .section {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .section:last-child { border-bottom: none; }
+
+  h1 {
+    font-size: 15px;
+    margin: 0 0 2px;
+    letter-spacing: -0.01em;
+  }
+  .subtitle { color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+
+  .label {
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 7px;
+  }
+
+  /* --- segmented button groups (view switcher, encryption filter) --- */
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button {
+    flex: 1;
+    padding: 7px 4px;
+    border: none;
+    background: #fff;
+    font: inherit;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    border-right: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  .seg button:last-child { border-right: none; }
+  .seg button:hover { background: #f9fafb; }
+  .seg button.active { background: var(--accent); color: #fff; font-weight: 600; }
+
+  /* --- stats grid --- */
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 12px; }
+  .stat-val { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat-key { font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+
+  /* --- form controls --- */
+  input[type="search"], select {
+    width: 100%;
+    padding: 6px 9px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font: inherit;
+    font-size: 12.5px;
+    background: #fff;
+    color: var(--fg);
+  }
+  input[type="search"]:focus, select:focus {
+    outline: 2px solid var(--accent-soft);
+    border-color: var(--accent);
+  }
+  input[type="range"] { width: 100%; accent-color: var(--accent); margin: 2px 0 0; }
+
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+  .linkbtn {
+    background: none; border: none; padding: 0;
+    font: inherit; font-size: 11.5px;
+    color: var(--accent); cursor: pointer;
+  }
+  .linkbtn:hover { text-decoration: underline; }
+
+  /* --- SSID list --- */
+  #ssid-list {
+    margin-top: 8px;
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  .ssid-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 8px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .ssid-row:last-child { border-bottom: none; }
+  .ssid-row:hover { background: #f9fafb; }
+  .ssid-row input { margin: 0; accent-color: var(--accent); cursor: pointer; flex: 0 0 auto; }
+  .ssid-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; border: 1px solid rgba(0,0,0,.35); }
+  .ssid-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .ssid-name:hover { color: var(--accent); text-decoration: underline; }
+  .ssid-count {
+    flex: 0 0 auto;
+    font-size: 10.5px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* --- legend --- */
+  .legend-row { display: flex; align-items: center; gap: 8px; padding: 2.5px 0; }
+  .legend-swatch { width: 13px; height: 13px; border-radius: 3px; flex: 0 0 auto; border: 1px solid rgba(0,0,0,.2); }
+  .legend-label { flex: 1; font-size: 12px; }
+  .legend-range { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .legend-gradient { height: 12px; border-radius: 3px; margin: 4px 0 3px; }
+
+  .note {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.5;
+    margin-top: 9px;
+  }
+
+  .hidden { display: none !important; }
+
+  /* --- map popup --- */
+  .leaflet-popup-content { margin: 10px 12px; font-size: 12px; line-height: 1.55; }
+  .popup-title {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 5px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid var(--line);
+    word-break: break-all;
+  }
+  .popup-grid { display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; }
+  .popup-grid dt { color: var(--muted); }
+  .popup-grid dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+  /* --- offline banner --- */
+  #tile-warning {
+    position: absolute;
+    top: 10px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    color: #78350f;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.15);
+  }
+
+  @media (max-width: 760px) {
+    #app { flex-direction: column; }
+    #map { height: 55vh; flex: none; }
+    #panel { width: 100%; flex: 1; border-left: none; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+
+<body>
+<div id="app">
+  <div id="map">
+    <div id="tile-warning" class="hidden">
+      Basemap tiles unavailable (offline) &mdash; measurements are still plotted.
+    </div>
+  </div>
+
+  <aside id="panel">
+
+    <div class="section">
+      <h1>WiFi Signal Map</h1>
+      <div class="subtitle" id="subtitle"></div>
+    </div>
+
+    <div class="section">
+      <div class="label">View</div>
+      <div class="seg" id="view-seg">
+        <button data-view="aps" class="active">AP dots</button>
+        <button data-view="coverage">Coverage</button>
+        <button data-view="density">Density</button>
+      </div>
+      <div class="note" id="view-note"></div>
+    </div>
+
+    <!-- Coverage: pick one network -->
+    <div class="section hidden" id="coverage-section">
+      <div class="label">Network to map</div>
+      <select id="coverage-ssid"></select>
+      <div class="note" id="coverage-note"></div>
+    </div>
+
+    <!-- Filters: apply to the AP-dots view -->
+    <div class="section" id="filter-section">
+      <div class="label">Minimum signal</div>
+      <input type="range" id="rssi-slider" min="-100" max="-20" step="1" value="-100">
+      <div class="row" style="margin-top:2px;">
+        <span class="legend-range" id="rssi-value">all signals</span>
+        <button class="linkbtn" id="rssi-reset">reset</button>
+      </div>
+
+      <div class="label" style="margin-top:14px;">Encryption</div>
+      <div class="seg" id="enc-seg">
+        <button data-enc="all" class="active">All</button>
+        <button data-enc="Open">Open</button>
+        <button data-enc="Secured">Secured</button>
+      </div>
+
+      <div class="row" style="margin-top:14px;">
+        <div class="label" style="margin:0;">Networks</div>
+        <div>
+          <button class="linkbtn" id="sel-all">all</button>
+          <span style="color:var(--line);">|</span>
+          <button class="linkbtn" id="sel-none">none</button>
+        </div>
+      </div>
+      <input type="search" id="ssid-search" placeholder="Search networks..." style="margin-top:7px;">
+      <div id="ssid-list"></div>
+      <div class="note">Click a network name to zoom to it.</div>
+    </div>
+
+    <div class="section">
+      <div class="label" id="legend-title">Signal quality</div>
+      <div id="legend"></div>
+    </div>
+
+    <div class="section">
+      <div class="label">Statistics</div>
+      <div class="stats">
+        <div><div class="stat-val" id="s-points">0</div><div class="stat-key" id="s-points-key">AP points shown</div></div>
+        <div><div class="stat-val" id="s-ssids">0</div><div class="stat-key">networks shown</div></div>
+        <div><div class="stat-val" id="s-best">-</div><div class="stat-key">strongest (dBm)</div></div>
+        <div><div class="stat-val" id="s-worst">-</div><div class="stat-key">weakest (dBm)</div></div>
+      </div>
+      <div class="note" id="dataset-note"></div>
+    </div>
+
+    <div class="section">
+      <div class="label">Basemap</div>
+      <div class="seg" id="base-seg">
+        <button data-base="osm" class="active">Street</button>
+        <button data-base="sat">Satellite</button>
+      </div>
+      <button class="linkbtn" id="fit-btn" style="margin-top:10px;">Zoom to all data</button>
+    </div>
+
+  </aside>
+</div>
+
+<script>/*__LEAFLET_JS__*/</script>
+<script>/*__LEAFLET_HEAT_JS__*/</script>
+<script>const DATA = /*__DATA__*/;</script>
+
+<script>
+"use strict";
+
+/* ============================================================
+   Signal-quality bands.
+   These thresholds reproduce exactly what the ESP32 firmware puts in the
+   SignalQuality column, so a dot's colour always agrees with the raw log.
+   ============================================================ */
+const BANDS = [
+  { label: "Excellent", color: "#1a9850", range: "≥ -50" },
+  { label: "Good",      color: "#91cf60", range: "-51 to -60" },
+  { label: "Fair",      color: "#fee08b", range: "-61 to -70" },
+  { label: "Weak",      color: "#fc8d59", range: "-71 to -80" },
+  { label: "Very Poor", color: "#d73027", range: "≤ -81" }
+];
+
+function bandOf(rssi) {
+  if (rssi >= -50) return 0;
+  if (rssi >= -60) return 1;
+  if (rssi >= -70) return 2;
+  if (rssi >= -80) return 3;
+  return 4;
+}
+const colorOf = (rssi) => BANDS[bandOf(rssi)].color;
+const labelOf = (rssi) => BANDS[bandOf(rssi)].label;
+
+/* Column positions inside the packed arrays emitted by build_viewer.py.
+   Packed arrays (rather than objects) keep the generated file small. */
+const AP = { SSID: 0, LAT: 1, LON: 2, RSSI: 3, CHAN: 4, ENC: 5, N: 6, FIRST: 7, LAST: 8 };
+const SC = { LAT: 0, LON: 1, COUNT: 2, BEST: 3, TS: 4 };
+const CELL = { IY: 0, IX: 1, RSSI: 2, N: 3 };
+
+const VIEW_NOTES = {
+  aps: "One dot per network per location, clustered within " + DATA.meta.clusterM +
+       " m. Colour is the median RSSI of the measurements in that cluster.",
+  coverage: "Measurements binned into " + DATA.meta.cellM +
+            " m cells and averaged, for one network at a time. This is a signal-strength " +
+            "surface, not a density blur — an empty cell means no measurement there.",
+  density: "How many distinct networks were visible at each scan point. This shows " +
+           "AP congestion, not signal strength — the colour scale below is unrelated to dBm."
+};
+
+/* ============================================================
+   Map
+   ============================================================ */
+const map = L.map("map", {
+  preferCanvas: true,          // thousands of vector dots stay smooth
+  zoomControl: true,
+  center: DATA.meta.center,
+  zoom: 17
+});
+
+const baseLayers = {
+  osm: L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors",
+    maxZoom: 19, maxNativeZoom: 19
+  }),
+  sat: L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { attribution: "Esri, Maxar, Earthstar Geographics", maxZoom: 19, maxNativeZoom: 19 }
+  )
+};
+
+let activeBase = baseLayers.osm.addTo(map);
+L.control.scale({ imperial: false }).addTo(map);
+
+// If tiles can't load (no network), say so once but keep the data on screen.
+let tileWarned = false;
+Object.values(baseLayers).forEach((layer) => {
+  layer.on("tileerror", () => {
+    if (tileWarned) return;
+    tileWarned = true;
+    document.getElementById("tile-warning").classList.remove("hidden");
+  });
+});
+
+const apLayer = L.layerGroup().addTo(map);
+const gridLayer = L.layerGroup();
+let heatLayer = null;
+
+const dataBounds = L.latLngBounds(DATA.meta.bounds);
+map.fitBounds(dataBounds, { padding: [30, 30] });
+
+/* ============================================================
+   UI state
+   ============================================================ */
+const state = {
+  view: "aps",
+  minRssi: -100,
+  enc: "all",
+  selected: new Set(DATA.ssids.map((_, i) => i)),   // SSID indices currently shown
+  search: ""
+};
+
+/* Per-SSID measurement counts + bounds, for the list and the zoom-to action. */
+const ssidStats = DATA.ssids.map(() => ({ points: 0, measurements: 0, best: -999, latlngs: [] }));
+DATA.aps.forEach((ap) => {
+  const st = ssidStats[ap[AP.SSID]];
+  st.points += 1;
+  st.measurements += ap[AP.N];
+  st.best = Math.max(st.best, ap[AP.RSSI]);
+  st.latlngs.push([ap[AP.LAT], ap[AP.LON]]);
+});
+
+/* Draw order: weakest first, so strong signals sit on top and stay visible. */
+const apsByStrength = DATA.aps.map((ap, i) => i).sort(
+  (a, b) => DATA.aps[a][AP.RSSI] - DATA.aps[b][AP.RSSI]
+);
+
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function apPasses(ap) {
+  return state.selected.has(ap[AP.SSID])
+      && ap[AP.RSSI] >= state.minRssi
+      && (state.enc === "all" || DATA.enc[ap[AP.ENC]] === state.enc);
+}
+
+/* ============================================================
+   View: AP dots
+   ============================================================ */
+function drawAPs() {
+  apLayer.clearLayers();
+
+  let shown = 0, best = -999, worst = 999;
+  const ssidsShown = new Set();
+
+  apsByStrength.forEach((idx) => {
+    const ap = DATA.aps[idx];
+    if (!apPasses(ap)) return;
+
+    shown += 1;
+    ssidsShown.add(ap[AP.SSID]);
+    best = Math.max(best, ap[AP.RSSI]);
+    worst = Math.min(worst, ap[AP.RSSI]);
+
+    const rssi = ap[AP.RSSI];
+    L.circleMarker([ap[AP.LAT], ap[AP.LON]], {
+      radius: 5.5,
+      color: "#1a1d21",
+      weight: 0.8,
+      opacity: 0.75,
+      fillColor: colorOf(rssi),
+      fillOpacity: 0.85
+    }).bindPopup(apPopup(ap), { maxWidth: 300 }).addTo(apLayer);
+  });
+
+  updateStats(shown, ssidsShown.size, best, worst, "AP points shown");
+}
+
+function apPopup(ap) {
+  const rssi = ap[AP.RSSI];
+  const rows = [
+    ["Signal", rssi.toFixed(1) + " dBm (" + labelOf(rssi) + ")"],
+    ["Channel", ap[AP.CHAN]],
+    ["Encryption", DATA.enc[ap[AP.ENC]]],
+    ["Measurements", ap[AP.N]],
+    ["First seen", ap[AP.FIRST]],
+    ["Last seen", ap[AP.LAST]],
+    ["Position", ap[AP.LAT].toFixed(6) + ", " + ap[AP.LON].toFixed(6)]
+  ];
+  return '<div class="popup-title">' + esc(DATA.ssids[ap[AP.SSID]]) + "</div>" +
+         '<dl class="popup-grid">' +
+         rows.map(([k, v]) => "<dt>" + k + "</dt><dd>" + esc(v) + "</dd>").join("") +
+         "</dl>";
+}
+
+/* ============================================================
+   View: per-SSID coverage grid
+   ============================================================ */
+function drawCoverage() {
+  gridLayer.clearLayers();
+
+  const ssidIdx = parseInt(document.getElementById("coverage-ssid").value, 10);
+  const cells = DATA.grid[ssidIdx] || [];
+  const { originLat, originLon, cellLat, cellLon } = DATA.meta;
+
+  let best = -999, worst = 999, measured = 0;
+
+  cells.forEach((cell) => {
+    const rssi = cell[CELL.RSSI];
+    best = Math.max(best, rssi);
+    worst = Math.min(worst, rssi);
+    measured += cell[CELL.N];
+
+    const south = originLat + cell[CELL.IY] * cellLat;
+    const west = originLon + cell[CELL.IX] * cellLon;
+
+    L.rectangle([[south, west], [south + cellLat, west + cellLon]], {
+      stroke: false,
+      fillColor: colorOf(rssi),
+      fillOpacity: 0.6
+    }).bindPopup(
+      '<div class="popup-title">' + esc(DATA.ssids[ssidIdx]) + "</div>" +
+      '<dl class="popup-grid">' +
+      "<dt>Mean signal</dt><dd>" + rssi.toFixed(1) + " dBm (" + labelOf(rssi) + ")</dd>" +
+      "<dt>Measurements</dt><dd>" + cell[CELL.N] + "</dd>" +
+      "<dt>Cell size</dt><dd>" + DATA.meta.cellM + " × " + DATA.meta.cellM + " m</dd>" +
+      "</dl>", { maxWidth: 300 }
+    ).addTo(gridLayer);
+  });
+
+  document.getElementById("coverage-note").textContent =
+    cells.length + " cells from " + measured + " measurement" + (measured === 1 ? "" : "s") + ".";
+
+  updateStats(cells.length, cells.length ? 1 : 0, best, worst, "cells mapped");
+}
+
+function zoomToSSID(idx) {
+  const pts = ssidStats[idx].latlngs;
+  if (!pts.length) return;
+  // Pixel padding rather than a ratio: a network seen in one spot shouldn't
+  // zoom out just because its bounding box is a few metres across.
+  map.fitBounds(L.latLngBounds(pts), { padding: [45, 45], maxZoom: 19 });
+}
+
+/* ============================================================
+   View: AP density heatmap
+   ============================================================ */
+function drawDensity() {
+  if (heatLayer) { map.removeLayer(heatLayer); heatLayer = null; }
+
+  const maxCount = Math.max(...DATA.scans.map((s) => s[SC.COUNT]));
+  const points = DATA.scans.map((s) => [s[SC.LAT], s[SC.LON], s[SC.COUNT] / maxCount]);
+
+  heatLayer = L.heatLayer(points, {
+    radius: 25,
+    blur: 20,
+    maxZoom: 19,
+    minOpacity: 0.35,
+    gradient: { 0.0: "#2c7bb6", 0.35: "#abd9e9", 0.6: "#ffffbf", 0.8: "#fdae61", 1.0: "#d7191c" }
+  }).addTo(map);
+
+  const counts = DATA.scans.map((s) => s[SC.COUNT]);
+  updateStats(DATA.scans.length, maxCount, Math.max(...counts), Math.min(...counts), "scan points");
+}
+
+/* ============================================================
+   Stats + legend
+   ============================================================ */
+function updateStats(points, ssids, best, worst, pointsKey) {
+  const fmt = (v) => (v === -999 || v === 999 || !isFinite(v)) ? "-" : String(Math.round(v));
+  document.getElementById("s-points").textContent = points.toLocaleString();
+  document.getElementById("s-points-key").textContent = pointsKey;
+  document.getElementById("s-ssids").textContent = ssids.toLocaleString();
+  document.getElementById("s-best").textContent = fmt(best);
+  document.getElementById("s-worst").textContent = fmt(worst);
+
+  const isDensity = state.view === "density";
+  document.querySelector("#s-ssids + .stat-key").textContent =
+    isDensity ? "busiest scan (APs)" : "networks shown";
+  document.querySelector("#s-best + .stat-key").textContent =
+    isDensity ? "max APs at a point" : "strongest (dBm)";
+  document.querySelector("#s-worst + .stat-key").textContent =
+    isDensity ? "min APs at a point" : "weakest (dBm)";
+}
+
+function renderLegend() {
+  const legend = document.getElementById("legend");
+  const title = document.getElementById("legend-title");
+  legend.innerHTML = "";
+
+  if (state.view === "density") {
+    title.textContent = "Networks visible";
+    const bar = document.createElement("div");
+    bar.className = "legend-gradient";
+    bar.style.background =
+      "linear-gradient(to right, #2c7bb6, #abd9e9 35%, #ffffbf 60%, #fdae61 80%, #d7191c)";
+    legend.appendChild(bar);
+    const scale = document.createElement("div");
+    scale.className = "row";
+    scale.innerHTML = '<span class="legend-range">fewer APs</span>' +
+                      '<span class="legend-range">more APs</span>';
+    legend.appendChild(scale);
+    return;
+  }
+
+  title.textContent = state.view === "coverage" ? "Mean signal per cell" : "Median signal per cluster";
+  BANDS.forEach((band) => {
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    row.innerHTML =
+      '<span class="legend-swatch" style="background:' + band.color + '"></span>' +
+      '<span class="legend-label">' + band.label + "</span>" +
+      '<span class="legend-range">' + band.range + " dBm</span>";
+    legend.appendChild(row);
+  });
+}
+
+/* ============================================================
+   SSID list
+   ============================================================ */
+function renderSSIDList() {
+  const list = document.getElementById("ssid-list");
+  list.innerHTML = "";
+
+  const term = state.search.toLowerCase();
+  const order = DATA.ssids
+    .map((name, i) => i)
+    .filter((i) => !term || DATA.ssids[i].toLowerCase().includes(term))
+    .sort((a, b) => ssidStats[b].measurements - ssidStats[a].measurements);
+
+  if (!order.length) {
+    const empty = document.createElement("div");
+    empty.className = "ssid-row";
+    empty.style.color = "var(--muted)";
+    empty.textContent = "No networks match.";
+    list.appendChild(empty);
+    return;
+  }
+
+  order.forEach((i) => {
+    const row = document.createElement("div");
+    row.className = "ssid-row";
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = state.selected.has(i);
+    cb.addEventListener("change", () => {
+      if (cb.checked) state.selected.add(i); else state.selected.delete(i);
+      drawAPs();
+    });
+
+    const dot = document.createElement("span");
+    dot.className = "ssid-dot";
+    dot.style.background = colorOf(ssidStats[i].best);
+
+    const name = document.createElement("span");
+    name.className = "ssid-name";
+    name.textContent = DATA.ssids[i];              // textContent: never interpreted as HTML
+    name.title = DATA.ssids[i] + " — click to zoom";
+    name.addEventListener("click", () => zoomToSSID(i));
+
+    const count = document.createElement("span");
+    count.className = "ssid-count";
+    count.textContent = ssidStats[i].measurements;
+
+    row.append(cb, dot, name, count);
+    list.appendChild(row);
+  });
+}
+
+function populateCoverageSelect() {
+  const select = document.getElementById("coverage-ssid");
+  const order = DATA.ssids
+    .map((name, i) => i)
+    .filter((i) => (DATA.grid[i] || []).length)
+    .sort((a, b) => ssidStats[b].measurements - ssidStats[a].measurements);
+
+  order.forEach((i) => {
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = DATA.ssids[i] + "  (" + ssidStats[i].measurements + " measurements)";
+    select.appendChild(opt);
+  });
+}
+
+/* ============================================================
+   View switching
+   ============================================================ */
+function setView(view) {
+  state.view = view;
+
+  map.removeLayer(apLayer);
+  map.removeLayer(gridLayer);
+  if (heatLayer) { map.removeLayer(heatLayer); heatLayer = null; }
+
+  document.getElementById("filter-section").classList.toggle("hidden", view !== "aps");
+  document.getElementById("coverage-section").classList.toggle("hidden", view !== "coverage");
+  document.getElementById("view-note").textContent = VIEW_NOTES[view];
+
+  if (view === "aps") { apLayer.addTo(map); drawAPs(); }
+  else if (view === "coverage") { gridLayer.addTo(map); drawCoverage(); }
+  else { drawDensity(); }
+
+  renderLegend();
+}
+
+/* ============================================================
+   Wiring
+   ============================================================ */
+document.getElementById("view-seg").addEventListener("click", (e) => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  document.querySelectorAll("#view-seg button").forEach((b) => b.classList.remove("active"));
+  btn.classList.add("active");
+  setView(btn.dataset.view);
+});
+
+document.getElementById("enc-seg").addEventListener("click", (e) => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  document.querySelectorAll("#enc-seg button").forEach((b) => b.classList.remove("active"));
+  btn.classList.add("active");
+  state.enc = btn.dataset.enc;
+  drawAPs();
+});
+
+document.getElementById("base-seg").addEventListener("click", (e) => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  document.querySelectorAll("#base-seg button").forEach((b) => b.classList.remove("active"));
+  btn.classList.add("active");
+  map.removeLayer(activeBase);
+  activeBase = baseLayers[btn.dataset.base].addTo(map);
+});
+
+const slider = document.getElementById("rssi-slider");
+slider.addEventListener("input", () => {
+  state.minRssi = parseInt(slider.value, 10);
+  document.getElementById("rssi-value").textContent =
+    state.minRssi <= -100 ? "all signals" : "≥ " + state.minRssi + " dBm";
+  drawAPs();
+});
+document.getElementById("rssi-reset").addEventListener("click", () => {
+  slider.value = -100;
+  slider.dispatchEvent(new Event("input"));
+});
+
+document.getElementById("ssid-search").addEventListener("input", (e) => {
+  state.search = e.target.value;
+  renderSSIDList();
+});
+
+/* "all" / "none" act on the networks currently visible in the list, so they
+   compose with the search box instead of fighting it. */
+function visibleSSIDIndices() {
+  const term = state.search.toLowerCase();
+  return DATA.ssids.map((n, i) => i).filter((i) => !term || DATA.ssids[i].toLowerCase().includes(term));
+}
+document.getElementById("sel-all").addEventListener("click", () => {
+  visibleSSIDIndices().forEach((i) => state.selected.add(i));
+  renderSSIDList(); drawAPs();
+});
+document.getElementById("sel-none").addEventListener("click", () => {
+  visibleSSIDIndices().forEach((i) => state.selected.delete(i));
+  renderSSIDList(); drawAPs();
+});
+
+document.getElementById("coverage-ssid").addEventListener("change", drawCoverage);
+document.getElementById("fit-btn").addEventListener("click", () => {
+  map.fitBounds(dataBounds, { padding: [30, 30] });
+});
+
+/* ============================================================
+   Boot
+   ============================================================ */
+document.getElementById("subtitle").textContent =
+  DATA.meta.rows.toLocaleString() + " measurements · " +
+  DATA.meta.scans.toLocaleString() + " scan points · " +
+  DATA.ssids.length + " networks";
+
+document.getElementById("dataset-note").textContent =
+  "Logged " + DATA.meta.timeStart + " to " + DATA.meta.timeEnd + ".";
+
+renderSSIDList();
+populateCoverageSelect();
+setView("aps");
+</script>
+</body>
+</html>
