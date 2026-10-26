@@ -1,4 +1,4 @@
-# WiFi Signal Strength Mapper
+# WiFi Signal Strength Mapper( let's go )
 
 Maps WiFi signal strength across a location by pairing WiFi scans with GPS fixes.
 
