@@ -288,7 +288,7 @@
     <div class="section">
       <div class="label">Basemap</div>
       <div class="seg" id="base-seg">
-        <button data-base="osm" class="active">Street</button>
+        <button data-base="street" class="active">Street</button>
         <button data-base="sat">Satellite</button>
       </div>
       <button class="linkbtn" id="fit-btn" style="margin-top:10px;">Zoom to all data</button>
@@ -353,29 +353,103 @@ const map = L.map("map", {
   zoom: 17
 });
 
-const baseLayers = {
-  osm: L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap contributors",
-    maxZoom: 19, maxNativeZoom: 19
-  }),
-  sat: L.tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    { attribution: "Esri, Maxar, Earthstar Geographics", maxZoom: 19, maxNativeZoom: 19 }
-  )
+/* Tile providers, in fallback order per basemap.
+
+   Two providers refuse this page, and both refuse it as a 200 OK placeholder
+   *image* rather than an HTTP error - so the tile renders like a normal map
+   tile and no error handler below can detect it:
+
+     - OpenStreetMap's MAIN servers (tile.openstreetmap.org) block clients
+       that send no identifying Referer, which is what a page opened from
+       file:// looks like. They serve an "Access blocked" tile.
+     - CARTO (basemaps.cartocdn.com) serves an "API KEY REQUIRED" watermark
+       on every style and endpoint, including the legacy Fastly host.
+
+   So: if you change provider, check a tile VISUALLY. A successful load says
+   nothing about whether the image is actually a map.
+
+   The default below is the standard OSM rendering served by FOSSGIS
+   (tile.openstreetmap.de), which carries the same full detail as CARTO's
+   Voyager style and needs no key. These are volunteer-run servers - fine for
+   a project like this, not for anything that hammers them.
+
+   LOCAL_TILES, if set, is tried first: point it at a directory of
+   {z}/{x}/{y}.png tiles to make the map work with no network at all. */
+const LOCAL_TILES = null;   // e.g. "tiles/{z}/{x}/{y}.png"
+
+/* Paste a CARTO API key here to use CARTO's Voyager basemap as the preferred
+   street map. Free tier: https://carto.com/basemaps  (left blank, the no-key
+   providers below are used instead and nothing breaks). */
+const CARTO_API_KEY = "";
+
+const BASEMAPS = {
+  street: [
+    ...(CARTO_API_KEY ? [{
+      url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?api_key=" +
+           encodeURIComponent(CARTO_API_KEY),
+      options: {
+        subdomains: "abcd",
+        attribution: "&copy; OpenStreetMap contributors, &copy; CARTO"
+      }
+    }] : []),
+    {
+      url: "https://tile.openstreetmap.de/{z}/{x}/{y}.png",
+      options: { attribution: "&copy; OpenStreetMap contributors (tiles: FOSSGIS)" }
+    },
+    {
+      url: "https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png",
+      options: { subdomains: "abc", attribution: "&copy; OpenStreetMap contributors (tiles: OSM France)" }
+    },
+    {
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+      options: { attribution: "Tiles &copy; Esri" }
+    }
+  ],
+  sat: [
+    {
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      options: { attribution: "Tiles &copy; Esri, Maxar, Earthstar Geographics" }
+    }
+  ]
 };
 
-let activeBase = baseLayers.osm.addTo(map);
-L.control.scale({ imperial: false }).addTo(map);
+if (LOCAL_TILES) {
+  BASEMAPS.street.unshift({ url: LOCAL_TILES, options: { attribution: "Local tile cache" } });
+}
 
-// If tiles can't load (no network), say so once but keep the data on screen.
-let tileWarned = false;
-Object.values(baseLayers).forEach((layer) => {
-  layer.on("tileerror", () => {
-    if (tileWarned) return;
-    tileWarned = true;
+let activeLayer = null;
+
+/* Swap in basemap `kind`, falling back to its next provider if tiles genuinely
+   fail to load. Note this only catches real network/404 errors - a provider
+   that answers with a placeholder image instead cannot be detected here. */
+function showBasemap(kind, idx) {
+  idx = idx || 0;
+
+  if (activeLayer) { map.removeLayer(activeLayer); activeLayer = null; }
+
+  const spec = BASEMAPS[kind][idx];
+  if (!spec) {                                  // every provider failed
     document.getElementById("tile-warning").classList.remove("hidden");
+    return;
+  }
+
+  const layer = L.tileLayer(
+    spec.url,
+    Object.assign({ maxZoom: 19, maxNativeZoom: 19 }, spec.options)
+  );
+
+  let handled = false;
+  layer.on("tileerror", function () {
+    if (handled || activeLayer !== layer) return;
+    handled = true;
+    showBasemap(kind, idx + 1);
   });
-});
+
+  activeLayer = layer.addTo(map);
+}
+
+showBasemap("street");
+L.control.scale({ imperial: false }).addTo(map);
 
 const apLayer = L.layerGroup().addTo(map);
 const gridLayer = L.layerGroup();
@@ -704,8 +778,7 @@ document.getElementById("base-seg").addEventListener("click", (e) => {
   if (!btn) return;
   document.querySelectorAll("#base-seg button").forEach((b) => b.classList.remove("active"));
   btn.classList.add("active");
-  map.removeLayer(activeBase);
-  activeBase = baseLayers[btn.dataset.base].addTo(map);
+  showBasemap(btn.dataset.base);
 });
 
 const slider = document.getElementById("rssi-slider");

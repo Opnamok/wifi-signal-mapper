@@ -35,10 +35,10 @@ from datetime import datetime, timezone, timedelta
 # Shared configuration
 # ============================================================
 
-SHEET_ID = "1pHg-lgImRUUAHPI8eXAPXVKCM5IDRqp6lhoZE0FLwgg"
+SHEET_ID = "1PXC3bnRmL76fF3Ra4pkgGVh54sjIJNKkvRgT6nHn9yI"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0"
 
-SERIAL_PORT = "COM6"
+SERIAL_PORT = "COM5"
 SERIAL_BAUD = 115200
 
 SNAPSHOT_PATH = os.path.join("data", "scan_log.csv")
@@ -184,6 +184,10 @@ def _update_live_state(ts, lat, lon, alt, sats, ssid, rssi, channel, encryption,
         _live_state["altitude"] = alt
         _live_state["satellites"] = sats
 
+        # Several APs can share an SSID; keep the strongest reading of each.
+        existing = next((n for n in _live_state["networks"] if n["ssid"] == ssid), None)
+        if existing is not None and float(existing["rssi"]) >= float(rssi):
+            return
         _live_state["networks"] = [n for n in _live_state["networks"] if n["ssid"] != ssid]
         _live_state["networks"].append({
             "ssid": ssid, "rssi": rssi, "channel": channel,
@@ -264,9 +268,16 @@ LOCAL_LIVE_HTML = """<!DOCTYPE html>
 <script>
 const REFRESH_MS = 5000;  // matches the ~5s WiFi scan / Sheets flush cadence
 const map = L.map('map').setView([0, 0], 3);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors',
-    maxZoom: 20,
+// The standard OSM rendering, served by FOSSGIS. Not tile.openstreetmap.org
+// (blocks clients sending no identifying Referer) and not CARTO (needs an API
+// key); both answer with a 200 OK placeholder image, so their refusal renders
+// as a normal-looking tile and no error handler catches it.
+// FOSSGIS only renders zoom 17+ over Germany (404 elsewhere), so above zoom 16
+// Leaflet scales up the zoom-16 tiles instead of showing a blank background.
+L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors (tiles: FOSSGIS)',
+    maxZoom: 19,
+    maxNativeZoom: 16,
 }).addTo(map);
 
 let marker = null;
@@ -562,9 +573,14 @@ const CSV_URL = "{sheet_url}";
 const REFRESH_MS = {refresh_ms};
 
 const map = L.map('map').setView([0, 0], 3);
-L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-    attribution: '&copy; OpenStreetMap contributors',
-    maxZoom: 20,
+// See the note in LOCAL_LIVE_HTML: tile.openstreetmap.org blocks requests
+// carrying no identifying Referer (which is what file:// pages send), and
+// CARTO needs an API key. This FOSSGIS mirror serves the same OSM rendering.
+// Zoom 17+ tiles 404 outside Germany - scale up zoom 16 (see LOCAL_LIVE_HTML).
+L.tileLayer('https://tile.openstreetmap.de/{{z}}/{{x}}/{{y}}.png', {{
+    attribution: '&copy; OpenStreetMap contributors (tiles: FOSSGIS)',
+    maxZoom: 19,
+    maxNativeZoom: 16,
 }}).addTo(map);
 
 let marker = null;

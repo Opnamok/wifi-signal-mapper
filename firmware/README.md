@@ -2,9 +2,50 @@
 
 Hardware: **Seeed XIAO ESP32-C6** (WiFi scanning) + **NEO-6M GPS** on UART.
 
-The sketch lives in the Arduino sketchbook and is not duplicated here. What
-matters to the Python side is the line format, recorded below so the sketch and
-the parser stay in sync.
+The sketch is [`wifi_gps_logger/wifi_gps_logger.ino`](wifi_gps_logger/wifi_gps_logger.ino).
+What matters to the Python side is the line format, recorded below so the
+sketch and the parser stay in sync.
+
+## Building and flashing
+
+Needs the **esp32** board package (Espressif) and the **TinyGPSPlus** library
+(Mikal Hart). In the Arduino IDE pick the board *XIAO_ESP32C6*; from the
+command line:
+
+```bash
+arduino-cli lib install TinyGPSPlus
+arduino-cli compile -b esp32:esp32:XIAO_ESP32C6 firmware/wifi_gps_logger
+arduino-cli upload -b esp32:esp32:XIAO_ESP32C6 -p COM5 firmware/wifi_gps_logger
+```
+
+The GPS module in this rig sends multi-constellation `$GN...` sentences rather
+than the NEO-6M's `$GP...`; TinyGPSPlus parses both. The WiFi scan runs
+asynchronously so the GPS is read continuously while the radio hops channels.
+
+## Wiring
+
+```
+   NEO-6M                         XIAO ESP32-C6
+  ────────                       ───────────────
+   VCC   ───────────────────►     3V3
+   GND   ───────────────────►     GND
+   TX    ───────────────────►     D7    (GPIO17, UART RX)
+   RX    ◄───────────────────     D6    (GPIO16, UART TX)
+```
+
+So the sketch opens the GPS link as:
+
+```cpp
+Serial1.begin(9600, SERIAL_8N1, D7, D6);   // RX, TX
+```
+
+Two serial links at two speeds: the GPS talks to the board at **9600**, the
+board talks to the laptop over USB at **115200**. Power the module from **3V3**
+— the XIAO is a 3.3 V-logic board, and more than 3.3 V on a GPIO can damage the
+chip. The `D6 → RX` wire is only needed if the sketch sends configuration
+commands to the module; reading NMEA alone does not require it.
+
+Full setup and demonstration steps: [../docs/DEMO_GUIDE.md](../docs/DEMO_GUIDE.md).
 
 ## Line format
 
@@ -35,6 +76,12 @@ Example:
 
 Baud rate **115200**. The logger ignores any line that doesn't split into
 exactly 10 comma-separated fields, and any line starting with `Timestamp`.
+
+The sketch prints the header line once at boot, and while it has no fix it
+prints a status line after each scan, such as
+`# no GPS fix yet: 4 satellites  51234 chars from GPS  0 sentences with fix  0 bad checksums`.
+Status lines start with `#` and contain no commas, so the logger skips them.
+If the chars count stays near 0, no data is reaching D7 from the GPS.
 
 ## Rules the parser depends on
 

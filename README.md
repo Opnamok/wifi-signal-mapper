@@ -10,6 +10,10 @@ script turns the collected log into a single self-contained HTML map.
 The current dataset: **2,869 measurements** across **217 scan points** and
 **59 networks**, logged 2026-08-27 to 2026-09-10.
 
+> **Wiring the hardware or running the demo?** See
+> **[docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)** — connections, pre-demo checklist,
+> a step-by-step demonstration script, and troubleshooting.
+
 ---
 
 ## The map
@@ -63,6 +67,46 @@ These thresholds reproduce exactly what the firmware writes into the
 | −61 to −70 | Fair |
 | −71 to −80 | Weak |
 | ≤ −81 | Very Poor |
+
+---
+
+## Basemap tiles
+
+The map ships with the **standard OpenStreetMap rendering served by FOSSGIS**
+(`tile.openstreetmap.de`) — full street, building and footpath detail, and no
+API key. If it fails to load, the viewer falls through to OSM France, then to
+Esri's World Street Map.
+
+Two providers you might reach for do **not** work here:
+
+| Provider | What happens |
+|---|---|
+| `tile.openstreetmap.org` | OSM's main servers block clients that send no identifying `Referer`, which is what a page opened by double-clicking looks like. Returns an "Access blocked" tile. |
+| `basemaps.cartocdn.com` | CARTO now requires an API key on every style and endpoint, including the legacy Fastly host. Returns an "API KEY REQUIRED" watermark. |
+
+Both serve their refusal as a **200 OK image**, so the browser reports a
+successful load and the tile renders like a normal map. No error handler can
+catch it. **If you change provider, look at a tile — a successful load proves
+nothing.**
+
+### Using CARTO
+
+CARTO's Voyager style works once you have a key (free tier at
+<https://carto.com/basemaps>). Paste it into `CARTO_API_KEY` near the top of
+the `<script>` block in `viewer/template.html` and rebuild:
+
+```js
+const CARTO_API_KEY = "your-key-here";
+```
+
+CARTO then becomes the preferred street basemap, with the no-key providers
+still behind it as fallbacks. Left blank, nothing breaks.
+
+### Working fully offline
+
+`LOCAL_TILES` in the same block takes a path like `"tiles/{z}/{x}/{y}.png"` and
+is tried before everything else. The logged area is only about 250 × 120 m, so
+caching zooms 16–19 is a few dozen tiles.
 
 ---
 
@@ -129,8 +173,10 @@ viewer/
   template.html       the Leaflet viewer, with placeholders for data + libraries
   vendor/             leaflet.css, leaflet.js, leaflet-heat.js (committed, inlined at build)
   wifi_map.html       generated — this is the file you open
-firmware/README.md    the serial line format the parser expects
-docs/initialcoding.txt  the original single-file prototype, kept for reference
+firmware/README.md    wiring + the serial line format the parser expects
+docs/
+  DEMO_GUIDE.md       hardware setup and step-by-step demonstration script
+  initialcoding.txt   the original single-file prototype, kept for reference
 ```
 
 `viewer/template.html` is not openable on its own — its `/*__..._*/` markers are
@@ -153,3 +199,7 @@ filled in by `build_viewer.py`.
   how much is being summarised.
 - **Indoor fixes drift.** Scans taken inside buildings inherit whatever fix the
   GPS last managed, so indoor measurements are less trustworthy than outdoor ones.
+- **The basemap needs a provider that allows `file://`.** See
+  [Basemap tiles](#basemap-tiles) below — two obvious providers refuse this
+  page, and both refuse it as a 200 OK image, so nothing detects it
+  automatically.
